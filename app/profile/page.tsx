@@ -1,14 +1,94 @@
 "use client"
 
+import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BottomNav } from "@/components/bottom-nav"
+import { useToast } from "@/components/toast-provider"
+import { getMe, getToken, logout, updatePatient, type Me } from "@/lib/api"
+
+function initials(name: string): string {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+}
+
+const EMPTY_FORM = { dob: "", gender: "", nationality: "", idProofType: "", idProofNumber: "" }
 
 export default function ProfilePage() {
+  const router = useRouter()
+  const { showToast } = useToast()
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  const [me, setMe] = useState<Me | null>(null)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => setMounted(true), [])
+
+  const loadMe = useCallback(() => {
+    return getMe().then((m) => {
+      setMe(m)
+      const s = m.patients.find((p) => p.relation === "SELF") ?? m.patients[0]
+      if (s) {
+        setForm({
+          dob: s.dob ? new Date(s.dob).toISOString().slice(0, 10) : "",
+          gender: s.gender ?? "",
+          nationality: s.nationality ?? "",
+          idProofType: s.idProofType ?? "",
+          idProofNumber: s.idProofNumber ?? "",
+        })
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!getToken()) {
+      router.replace("/login")
+      return
+    }
+    loadMe().catch(() => router.replace("/login"))
+  }, [router, loadMe])
+
+  const self = me?.patients.find((p) => p.relation === "SELF") ?? me?.patients[0]
+  const displayName = self?.fullName ?? "..."
+
+  const handleSave = async () => {
+    if (!self) return
+    setSaving(true)
+    try {
+      await updatePatient(self.id, {
+        dob: form.dob || undefined,
+        gender: form.gender || undefined,
+        nationality: form.nationality || undefined,
+        idProofType: form.idProofType || undefined,
+        idProofNumber: form.idProofNumber || undefined,
+      })
+      showToast("Profile updated!", "success")
+      await loadMe()
+    } catch {
+      showToast("Could not save profile.", "error")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleLogout = () => {
+    logout()
+    router.replace("/login")
+  }
+
   return (
     <div className="mobile-container">
       <div className="min-h-screen bg-background content-with-nav">
@@ -28,36 +108,93 @@ export default function ProfilePage() {
 
           <div className="flex flex-col items-center">
             <Avatar className="w-24 h-24 border-4 border-white shadow-lg mb-3">
-              <AvatarFallback className="bg-white text-primary font-bold text-2xl">YK</AvatarFallback>
+              <AvatarFallback className="bg-white text-primary font-bold text-2xl">
+                {initials(displayName)}
+              </AvatarFallback>
             </Avatar>
-            <h2 className="text-xl font-bold text-white mb-1">Yashwanth Kumar</h2>
-            <p className="text-white/80 text-sm">Health ID: 91-XXXX-XXXX-1234</p>
+            <h2 className="text-xl font-bold text-white mb-1">{displayName}</h2>
+            <p className="text-white/80 text-sm">{me?.email ?? "—"}</p>
           </div>
         </div>
 
         {/* Personal Information */}
         <div className="p-6 space-y-4">
           <h3 className="font-semibold text-lg text-foreground">Personal Information</h3>
-          <Card className="p-4 space-y-3">
-            <div className="flex justify-between items-center py-2">
+          <Card className="p-4 space-y-4">
+            <div className="flex justify-between items-center">
               <span className="text-sm text-muted-foreground">Full Name</span>
-              <span className="font-medium">Yashwanth Kumar</span>
+              <span className="font-medium">{displayName}</span>
             </div>
             <div className="border-t border-border" />
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-muted-foreground">Date of Birth</span>
-              <span className="font-medium">Jan 15, 1995</span>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Email</span>
+              <span className="font-medium text-sm">{me?.email ?? "—"}</span>
             </div>
             <div className="border-t border-border" />
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-muted-foreground">Gender</span>
-              <span className="font-medium">Male</span>
+            <div>
+              <Label htmlFor="dob" className="text-sm text-muted-foreground">Date of Birth</Label>
+              <Input
+                id="dob"
+                type="date"
+                value={form.dob}
+                onChange={(e) => setForm({ ...form, dob: e.target.value })}
+                className="mt-1"
+              />
             </div>
-            <div className="border-t border-border" />
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-muted-foreground">Aadhaar Number</span>
-              <span className="font-medium">XXXX XXXX 1234</span>
+            <div>
+              <Label htmlFor="gender" className="text-sm text-muted-foreground">Gender</Label>
+              <Select value={form.gender} onValueChange={(v) => setForm({ ...form, gender: v })}>
+                <SelectTrigger id="gender" className="mt-1">
+                  <SelectValue placeholder="Select gender" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MALE">Male</SelectItem>
+                  <SelectItem value="FEMALE">Female</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </Card>
+
+          <h3 className="font-semibold text-lg text-foreground pt-4">Identity &amp; ID Proof</h3>
+          <Card className="p-4 space-y-4">
+            <div>
+              <Label htmlFor="nationality" className="text-sm text-muted-foreground">Nationality</Label>
+              <Input
+                id="nationality"
+                placeholder="e.g. Indian"
+                value={form.nationality}
+                onChange={(e) => setForm({ ...form, nationality: e.target.value })}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="idProofType" className="text-sm text-muted-foreground">ID Proof Type</Label>
+              <Select value={form.idProofType} onValueChange={(v) => setForm({ ...form, idProofType: v })}>
+                <SelectTrigger id="idProofType" className="mt-1">
+                  <SelectValue placeholder="Select ID proof" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AADHAAR">Aadhaar</SelectItem>
+                  <SelectItem value="DRIVING_LICENCE">Driving Licence</SelectItem>
+                  <SelectItem value="PASSPORT">Passport</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="idProofNumber" className="text-sm text-muted-foreground">ID Proof Number</Label>
+              <Input
+                id="idProofNumber"
+                placeholder="Enter the document number"
+                value={form.idProofNumber}
+                onChange={(e) => setForm({ ...form, idProofNumber: e.target.value })}
+                className="mt-1"
+              />
+            </div>
+            <Button onClick={handleSave} disabled={saving} className="w-full">
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
           </Card>
 
           {/* Settings */}
@@ -70,7 +207,11 @@ export default function ProfilePage() {
                 </Label>
                 <p className="text-xs text-muted-foreground">Enable dark theme</p>
               </div>
-              <Switch id="dark-mode" />
+              <Switch
+                id="dark-mode"
+                checked={mounted && theme === "dark"}
+                onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+              />
             </div>
             <div className="border-t border-border" />
             <div className="flex items-center justify-between">
@@ -160,7 +301,7 @@ export default function ProfilePage() {
             variant="destructive"
             className="w-full h-12 mt-6"
             size="lg"
-            onClick={() => (window.location.href = "/login")}
+            onClick={handleLogout}
           >
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

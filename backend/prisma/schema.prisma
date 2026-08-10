@@ -1,0 +1,196 @@
+// Vacciner Log — database schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER // a citizen using the app
+  PROVIDER // a hospital/clinic staff who records vaccinations
+  ADMIN // platform administrator
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum Relation {
+  SELF
+  SPOUSE
+  CHILD
+  PARENT
+  SIBLING
+  OTHER
+}
+
+enum RecordStatus {
+  COMPLETED
+  SCHEDULED
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  DONE
+  CANCELLED
+}
+
+enum IdProofType {
+  AADHAAR
+  DRIVING_LICENCE
+  PASSPORT
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Auth / account
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // A user manages one or more patient profiles (themselves + family members).
+  patients Patient[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// People whose vaccination records we track.
+// The account holder's own profile is a Patient with relation = SELF.
+// Family members are Patients owned by the same user with relation != SELF.
+// ---------------------------------------------------------------------------
+
+model Patient {
+  id        String    @id @default(uuid())
+  ownerId   String
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fullName  String
+  dob       DateTime?
+  gender    Gender?
+  relation  Relation  @default(SELF)
+  healthId  String?   @unique // ABHA / Health ID
+  phone     String?
+  nationality   String?
+  idProofType   IdProofType?
+  idProofNumber String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  records   VaccinationRecord[]
+  reminders Reminder[]
+
+  @@index([ownerId])
+  @@map("patients")
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+model Vaccine {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  totalDoses  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  records   VaccinationRecord[]
+  reminders Reminder[]
+
+  @@map("vaccines")
+}
+
+model Provider {
+  id                 String   @id @default(uuid())
+  name               String
+  city               String?
+  registrationNumber String?  @unique
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  records VaccinationRecord[]
+
+  @@map("providers")
+}
+
+// ---------------------------------------------------------------------------
+// The core record: a dose given to a patient
+// ---------------------------------------------------------------------------
+
+model VaccinationRecord {
+  id              String       @id @default(uuid())
+  patientId       String
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  vaccineId       String
+  vaccine         Vaccine      @relation(fields: [vaccineId], references: [id])
+  providerId      String?
+  provider        Provider?    @relation(fields: [providerId], references: [id])
+  doseNumber      Int          @default(1)
+  dateAdministered DateTime
+  batchNumber     String?
+  status          RecordStatus @default(COMPLETED)
+  verified        Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  certificate Certificate?
+
+  @@index([patientId])
+  @@index([vaccineId])
+  @@map("vaccination_records")
+}
+
+// ---------------------------------------------------------------------------
+// A verifiable certificate generated for a completed record
+// ---------------------------------------------------------------------------
+
+model Certificate {
+  id               String            @id @default(uuid())
+  recordId         String            @unique
+  record           VaccinationRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  verificationCode String            @unique // used by the public /verify endpoint
+  fileUrl          String? // link to the PDF in object storage (added later)
+  issuedAt         DateTime          @default(now())
+
+  @@map("certificates")
+}
+
+// ---------------------------------------------------------------------------
+// Upcoming-dose reminders
+// ---------------------------------------------------------------------------
+
+model Reminder {
+  id         String         @id @default(uuid())
+  patientId  String
+  patient    Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  vaccineId  String
+  vaccine    Vaccine        @relation(fields: [vaccineId], references: [id])
+  doseNumber Int            @default(1)
+  dueDate    DateTime
+  status     ReminderStatus @default(PENDING)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([patientId])
+  @@index([dueDate])
+  @@map("reminders")
+}
