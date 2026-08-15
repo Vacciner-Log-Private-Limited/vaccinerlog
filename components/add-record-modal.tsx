@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/toast-provider"
 import {
   ApiError,
   createRecord,
+  updatePatient,
   updateRecord,
   type Patient,
   type Provider,
@@ -44,6 +46,8 @@ export function AddRecordModal({
   const [doseNumber, setDoseNumber] = useState("1")
   const [date, setDate] = useState("")
   const [batchNumber, setBatchNumber] = useState("")
+  const [symptoms, setSymptoms] = useState("")
+  const [dob, setDob] = useState("")
   const [loading, setLoading] = useState(false)
   const { showToast } = useToast()
 
@@ -57,6 +61,9 @@ export function AddRecordModal({
       setDoseNumber(String(editRecord.doseNumber))
       setDate(editRecord.dateAdministered.slice(0, 10))
       setBatchNumber(editRecord.batchNumber ?? "")
+      setSymptoms(editRecord.symptoms ?? "")
+      const p = patients.find((pp) => pp.id === editRecord.patient?.id)
+      setDob(p?.dob ? p.dob.slice(0, 10) : "")
     } else {
       setPatientId("")
       setVaccineId("")
@@ -64,6 +71,8 @@ export function AddRecordModal({
       setDoseNumber("1")
       setDate("")
       setBatchNumber("")
+      setSymptoms("")
+      setDob("")
     }
   }, [isOpen, editRecord])
 
@@ -87,6 +96,7 @@ export function AddRecordModal({
           doseNumber: Number(doseNumber) || 1,
           dateAdministered: date,
           batchNumber: batchNumber || undefined,
+          symptoms: symptoms || undefined,
         })
         showToast("Record updated!", "success")
       } else {
@@ -97,8 +107,13 @@ export function AddRecordModal({
           doseNumber: Number(doseNumber) || 1,
           dateAdministered: date,
           batchNumber: batchNumber || undefined,
+          symptoms: symptoms || undefined,
         })
         showToast("Vaccination record added!", "success")
+      }
+      // Persist the person's date of birth (used to show their age).
+      if (dob && patientId) {
+        await updatePatient(patientId, { dob })
       }
       onClose()
       onSaved?.()
@@ -130,7 +145,14 @@ export function AddRecordModal({
             {isEdit ? (
               <Input value={patientName} disabled className="mt-1 opacity-70" />
             ) : (
-              <Select value={patientId} onValueChange={setPatientId}>
+              <Select
+                value={patientId}
+                onValueChange={(v) => {
+                  setPatientId(v)
+                  const p = patients.find((pp) => pp.id === v)
+                  setDob(p?.dob ? p.dob.slice(0, 10) : "")
+                }}
+              >
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Select person" />
                 </SelectTrigger>
@@ -144,6 +166,18 @@ export function AddRecordModal({
                 </SelectContent>
               </Select>
             )}
+          </div>
+
+          <div>
+            <Label htmlFor="dob">Date of Birth</Label>
+            <Input
+              id="dob"
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Used to show the person&apos;s age.</p>
           </div>
 
           <div>
@@ -205,6 +239,18 @@ export function AddRecordModal({
               placeholder="e.g. LOT-12345"
               value={batchNumber}
               onChange={(e) => setBatchNumber(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="symptoms">Symptoms (optional)</Label>
+            <Textarea
+              id="symptoms"
+              placeholder="Any symptoms caused by the vaccine, e.g. mild fever, soreness at the injection site"
+              value={symptoms}
+              onChange={(e) => setSymptoms(e.target.value)}
+              rows={3}
               className="mt-1"
             />
           </div>

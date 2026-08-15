@@ -11,6 +11,7 @@ import { ProvidersModule } from './providers/providers.module';
 import { RecordsModule } from './records/records.module';
 import { CertificatesModule } from './certificates/certificates.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { RemindersModule } from './reminders/reminders.module';
     RecordsModule,
     CertificatesModule,
     RemindersModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

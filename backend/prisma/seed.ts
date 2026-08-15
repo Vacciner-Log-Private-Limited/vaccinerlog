@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -35,9 +36,25 @@ async function main() {
     }
   }
 
+  // Platform admin account
+  const adminEmail = 'admin@vaccinerlog.app';
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
+  if (!existingAdmin) {
+    await prisma.user.create({
+      data: {
+        email: adminEmail,
+        passwordHash: await bcrypt.hash('admin1234', 10),
+        role: 'ADMIN',
+        patients: { create: { fullName: 'Platform Admin', relation: 'SELF' } },
+      },
+    });
+  }
+
   // eslint-disable-next-line no-console
   console.log(
-    `Seed complete: ${vaccines.length} vaccines, ${providers.length} providers`,
+    `Seed complete: ${vaccines.length} vaccines, ${providers.length} providers, admin=${adminEmail}`,
   );
 }
 

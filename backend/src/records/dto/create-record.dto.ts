@@ -39,6 +39,11 @@ export class CreateRecordDto {
   @IsString()
   batchNumber?: string;
 
+  @ApiPropertyOptional({ example: 'Mild fever and soreness at the injection site' })
+  @IsOptional()
+  @IsString()
+  symptoms?: string;
+
   @ApiPropertyOptional({ enum: RecordStatus, default: 'COMPLETED' })
   @IsOptional()
   @IsEnum(RecordStatus)

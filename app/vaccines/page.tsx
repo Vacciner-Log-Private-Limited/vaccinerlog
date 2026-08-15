@@ -14,7 +14,6 @@ import { LoadingSpinner } from "@/components/loading-spinner"
 import { AddRecordModal } from "@/components/add-record-modal"
 import { useToast } from "@/components/toast-provider"
 import {
-  deleteRecord,
   getPatients,
   getProviders,
   getRecords,
@@ -26,6 +25,12 @@ import {
   type Vaccine,
   type VaccinationRecord,
 } from "@/lib/api"
+
+function ageLabel(dob?: string | null): string {
+  if (!dob) return ""
+  const years = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
+  return years >= 0 ? ` · ${years} yrs` : ""
+}
 
 export default function VaccinesPage() {
   const router = useRouter()
@@ -75,17 +80,6 @@ export default function VaccinesPage() {
     }
     load()
   }, [router, load])
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this vaccination record?")) return
-    try {
-      await deleteRecord(id)
-      showToast("Record deleted.", "success")
-      setRecords((prev) => prev.filter((r) => r.id !== id))
-    } catch {
-      showToast("Could not delete record.", "error")
-    }
-  }
 
   const handleGenerate = async (id: string) => {
     setGeneratingId(id)
@@ -220,6 +214,7 @@ export default function VaccinesPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
                         {r.patient.fullName}
+                        {ageLabel(r.patient.dob)}
                       </span>
                     )}
                   </div>
@@ -275,6 +270,10 @@ export default function VaccinesPage() {
                       <span className="text-muted-foreground">Status:</span>
                       <span className="font-medium">{r.verified ? "Verified" : "Pending"}</span>
                     </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Symptoms:</span>
+                      <p className="font-medium mt-0.5">{r.symptoms || "None reported"}</p>
+                    </div>
 
                     {r.certificate ? (
                       <Link href={`/verify/${r.certificate.verificationCode}`} onClick={(e) => e.stopPropagation()}>
@@ -322,18 +321,6 @@ export default function VaccinesPage() {
                         />
                       </svg>
                       Edit Record
-                    </Button>
-
-                    <Button
-                      variant="destructive"
-                      className="w-full mt-2"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(r.id)
-                      }}
-                    >
-                      Delete Record
                     </Button>
                   </div>
                 )}

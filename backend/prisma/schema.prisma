@@ -147,6 +147,7 @@ model VaccinationRecord {
   doseNumber      Int          @default(1)
   dateAdministered DateTime
   batchNumber     String?
+  symptoms        String?
   status          RecordStatus @default(COMPLETED)
   verified        Boolean      @default(false)
   createdAt       DateTime     @default(now())

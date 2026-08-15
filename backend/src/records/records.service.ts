@@ -4,12 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CertificatesService } from '../certificates/certificates.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
 
 @Injectable()
 export class RecordsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly certificates: CertificatesService,
+  ) {}
 
   /** Verify the current user owns the given patient. */
   private async assertOwnsPatient(ownerId: string, patientId: string) {
@@ -27,7 +31,7 @@ export class RecordsService {
 
   async create(ownerId: string, dto: CreateRecordDto) {
     await this.assertOwnsPatient(ownerId, dto.patientId);
-    return this.prisma.vaccinationRecord.create({
+    const record = await this.prisma.vaccinationRecord.create({
       data: {
         patientId: dto.patientId,
         vaccineId: dto.vaccineId,
@@ -35,10 +39,16 @@ export class RecordsService {
         doseNumber: dto.doseNumber ?? 1,
         dateAdministered: new Date(dto.dateAdministered),
         batchNumber: dto.batchNumber ?? null,
+        symptoms: dto.symptoms ?? null,
         status: dto.status ?? 'COMPLETED',
       },
       include: { vaccine: true, provider: true },
     });
+    // Every vaccination record automatically gets a verifiable certificate,
+    // so it shows up on the Certificates page.
+    await this.certificates.issue(ownerId, record.id);
+    record.verified = true; // issue() marks the record verified
+    return record;
   }
 
   /** All records across the user's patients, optionally filtered to one patient. */
@@ -54,7 +64,7 @@ export class RecordsService {
       include: {
         vaccine: true,
         provider: true,
-        patient: { select: { id: true, fullName: true, relation: true } },
+        patient: { select: { id: true, fullName: true, relation: true, dob: true } },
         certificate: { select: { id: true, verificationCode: true } },
       },
       orderBy: { dateAdministered: 'desc' },
@@ -92,6 +102,7 @@ export class RecordsService {
           ? new Date(dto.dateAdministered)
           : undefined,
         batchNumber: dto.batchNumber,
+        symptoms: dto.symptoms,
         status: dto.status,
       },
       include: { vaccine: true, provider: true },

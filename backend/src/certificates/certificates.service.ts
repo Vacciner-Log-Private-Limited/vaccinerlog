@@ -128,20 +128,45 @@ export class CertificatesService {
 
   async generatePdf(ownerId: string, id: string): Promise<Buffer> {
     const cert = await this.findOne(ownerId, id);
-    return this.buildPdf(cert);
+    return this.buildPdf([cert]);
   }
 
-  private async buildPdf(cert: CertWithRecord): Promise<Buffer> {
-    const r = cert.record;
-    const verifyUrl = `${this.frontendUrl()}/verify/${cert.verificationCode}`;
-    const qrPng = await QRCode.toBuffer(verifyUrl, { width: 220, margin: 1 });
+  /** Combine several of the user's certificates into one multi-page PDF. */
+  async generateBundle(ownerId: string, ids: string[]): Promise<Buffer> {
+    const certs: CertWithRecord[] = [];
+    for (const id of ids) {
+      // findOne is owner-scoped — throws if a cert isn't the user's.
+      certs.push(await this.findOne(ownerId, id));
+    }
+    return this.buildPdf(certs);
+  }
 
+  /** Render one page per certificate into a single PDF buffer. */
+  private async buildPdf(certs: CertWithRecord[]): Promise<Buffer> {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
     const done = new Promise<Buffer>((resolve) =>
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
+
+    for (let i = 0; i < certs.length; i++) {
+      if (i > 0) doc.addPage();
+      await this.drawCertificate(doc, certs[i]);
+    }
+
+    doc.end();
+    return done;
+  }
+
+  /** Draw a single certificate onto the current page of `doc`. */
+  private async drawCertificate(
+    doc: PDFKit.PDFDocument,
+    cert: CertWithRecord,
+  ): Promise<void> {
+    const r = cert.record;
+    const verifyUrl = `${this.frontendUrl()}/verify/${cert.verificationCode}`;
+    const qrPng = await QRCode.toBuffer(verifyUrl, { width: 220, margin: 1 });
 
     // Header band
     doc.rect(0, 0, doc.page.width, 120).fill('#1976D2');
@@ -188,8 +213,5 @@ export class CertificatesService {
       .fontSize(9)
       .fillColor('#999')
       .text(`Verify this certificate at ${verifyUrl}`, 50, 770, { width: 500 });
-
-    doc.end();
-    return done;
   }
 }

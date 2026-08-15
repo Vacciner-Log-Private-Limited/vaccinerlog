@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { CertificatesService } from './certificates.service';
 import { IssueCertificateDto } from './dto/issue-certificate.dto';
+import { DownloadBundleDto } from './dto/download-bundle.dto';
 
 @ApiTags('certificates')
 @ApiBearerAuth()
@@ -24,6 +25,22 @@ export class CertificatesController {
   @Post()
   issue(@CurrentUser() user: AuthUser, @Body() dto: IssueCertificateDto) {
     return this.certificates.issue(user.id, dto.recordId);
+  }
+
+  // Combine several certificates into one PDF (download all / selected).
+  @Post('download')
+  async downloadBundle(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: DownloadBundleDto,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.certificates.generateBundle(user.id, dto.ids);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="certificates.pdf"',
+      'Content-Length': buffer.length.toString(),
+    });
+    res.end(buffer);
   }
 
   @Get()
