@@ -16,6 +16,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator';
 import { AdminService } from './admin.service';
 import { SetRoleDto } from './dto/set-role.dto';
+import { SetDoctorStatusDto } from './dto/set-doctor-status.dto';
 import {
   ProviderDto,
   UpdateProviderDto,
@@ -104,6 +105,17 @@ export class AdminController {
   @Delete('providers/:id')
   deleteProvider(@Param('id') id: string) {
     return this.admin.deleteProvider(id);
+  }
+
+  // ---- Doctors (verification) ----
+  @Get('doctors')
+  doctors() {
+    return this.admin.listDoctors();
+  }
+
+  @Patch('doctors/:id/status')
+  setDoctorStatus(@Param('id') id: string, @Body() dto: SetDoctorStatusDto) {
+    return this.admin.setDoctorStatus(id, dto.status);
   }
 
   // ---- Oversight (read-only) ----

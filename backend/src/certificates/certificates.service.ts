@@ -1,14 +1,11 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessService } from '../access/access.service';
 
 // A certificate joined with everything the PDF / verification needs.
 type CertWithRecord = Prisma.CertificateGetPayload<{
@@ -22,6 +19,7 @@ export class CertificatesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly access: AccessService,
   ) {}
 
   private frontendUrl(): string {
@@ -32,7 +30,7 @@ export class CertificatesService {
     return 'VL-' + randomBytes(6).toString('hex').toUpperCase();
   }
 
-  private async getOwnedRecord(ownerId: string, recordId: string) {
+  private async getOwnedRecord(userId: string, recordId: string) {
     const record = await this.prisma.vaccinationRecord.findUnique({
       where: { id: recordId },
       include: { patient: true, certificate: true },
@@ -40,15 +38,13 @@ export class CertificatesService {
     if (!record) {
       throw new NotFoundException('Record not found');
     }
-    if (record.patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this record');
-    }
+    await this.access.assertAccess(userId, record.patientId);
     return record;
   }
 
   /** Issue a certificate for a record (idempotent), and mark the record verified. */
-  async issue(ownerId: string, recordId: string) {
-    const record = await this.getOwnedRecord(ownerId, recordId);
+  async issue(userId: string, recordId: string) {
+    const record = await this.getOwnedRecord(userId, recordId);
     if (record.certificate) {
       return record.certificate;
     }
@@ -63,9 +59,9 @@ export class CertificatesService {
     return cert;
   }
 
-  findAllForUser(ownerId: string) {
+  findAllForUser(userId: string) {
     return this.prisma.certificate.findMany({
-      where: { record: { patient: { ownerId } } },
+      where: { record: { patient: this.access.patientWhere(userId) } },
       include: {
         record: {
           include: {
@@ -79,7 +75,7 @@ export class CertificatesService {
     });
   }
 
-  async findOne(ownerId: string, id: string): Promise<CertWithRecord> {
+  async findOne(userId: string, id: string): Promise<CertWithRecord> {
     const cert = await this.prisma.certificate.findUnique({
       where: { id },
       include: {
@@ -89,9 +85,7 @@ export class CertificatesService {
     if (!cert) {
       throw new NotFoundException('Certificate not found');
     }
-    if (cert.record.patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this certificate');
-    }
+    await this.access.assertAccess(userId, cert.record.patientId);
     return cert;
   }
 

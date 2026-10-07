@@ -13,6 +13,12 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BottomNav } from "@/components/bottom-nav"
 import { useToast } from "@/components/toast-provider"
+import {
+  ClinicalDetailsFields,
+  emptyClinicalValue,
+  type ClinicalValue,
+} from "@/components/clinical-details-fields"
+import { BmiCalculatorCard } from "@/components/bmi-calculator-card"
 import { getMe, getToken, logout, updatePatient, type Me } from "@/lib/api"
 
 function initials(name: string): string {
@@ -33,6 +39,11 @@ export default function ProfilePage() {
   const [mounted, setMounted] = useState(false)
   const [me, setMe] = useState<Me | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [clinical, setClinical] = useState<ClinicalValue>(emptyClinicalValue())
+  const [bodyMetrics, setBodyMetrics] = useState<{ height?: number | null; weight?: number | null }>({
+    height: null,
+    weight: null,
+  })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => setMounted(true), [])
@@ -40,7 +51,10 @@ export default function ProfilePage() {
   const loadMe = useCallback(() => {
     return getMe().then((m) => {
       setMe(m)
-      const s = m.patients.find((p) => p.relation === "SELF") ?? m.patients[0]
+      const s =
+        m.patients.find((p) => p.accessRole === "SELF") ??
+        m.patients.find((p) => p.relation === "SELF") ??
+        m.patients[0]
       if (s) {
         setForm({
           dob: s.dob ? new Date(s.dob).toISOString().slice(0, 10) : "",
@@ -48,6 +62,17 @@ export default function ProfilePage() {
           nationality: s.nationality ?? "",
           idProofType: s.idProofType ?? "",
           idProofNumber: s.idProofNumber ?? "",
+        })
+        setClinical({
+          healthConditions: s.healthConditions ?? [],
+          hasPriorComplications: s.hasPriorComplications ?? null,
+          complicationNotes: s.complicationNotes ?? "",
+          hasSurgicalComplications: s.hasSurgicalComplications ?? null,
+          surgicalComplicationNotes: s.surgicalComplicationNotes ?? "",
+        })
+        setBodyMetrics({
+          height: s.height ?? null,
+          weight: s.weight ?? null,
         })
       }
     })
@@ -61,7 +86,10 @@ export default function ProfilePage() {
     loadMe().catch(() => router.replace("/login"))
   }, [router, loadMe])
 
-  const self = me?.patients.find((p) => p.relation === "SELF") ?? me?.patients[0]
+  const self =
+    me?.patients.find((p) => p.accessRole === "SELF") ??
+    me?.patients.find((p) => p.relation === "SELF") ??
+    me?.patients[0]
   const displayName = self?.fullName ?? "..."
 
   const handleSave = async () => {
@@ -74,6 +102,13 @@ export default function ProfilePage() {
         nationality: form.nationality || undefined,
         idProofType: form.idProofType || undefined,
         idProofNumber: form.idProofNumber || undefined,
+        healthConditions: clinical.healthConditions,
+        hasPriorComplications: clinical.hasPriorComplications ?? undefined,
+        complicationNotes: clinical.complicationNotes || undefined,
+        hasSurgicalComplications: clinical.hasSurgicalComplications ?? undefined,
+        surgicalComplicationNotes: clinical.surgicalComplicationNotes || undefined,
+        height: bodyMetrics.height ?? null,
+        weight: bodyMetrics.weight ?? null,
       })
       showToast("Profile updated!", "success")
       await loadMe()
@@ -192,10 +227,31 @@ export default function ProfilePage() {
                 className="mt-1"
               />
             </div>
-            <Button onClick={handleSave} disabled={saving} className="w-full">
-              {saving ? "Saving..." : "Save Changes"}
-            </Button>
           </Card>
+
+          <h3 className="font-semibold text-lg text-foreground pt-4">Body Mass Index (BMI) &amp; Metrics</h3>
+          <BmiCalculatorCard
+            heightCm={bodyMetrics.height}
+            weightKg={bodyMetrics.weight}
+            dob={form.dob}
+            onChange={(patch) => setBodyMetrics((prev) => ({ ...prev, ...patch }))}
+          />
+
+          <h3 className="font-semibold text-lg text-foreground pt-4">Clinical health details</h3>
+          <Card className="p-4 space-y-4">
+            <p className="text-xs text-muted-foreground -mt-1">
+              Optional. Helps a clinic give safe, informed vaccinations. Only you and
+              anyone you share this profile with can see it.
+            </p>
+            <ClinicalDetailsFields
+              value={clinical}
+              onChange={(patch) => setClinical((c) => ({ ...c, ...patch }))}
+            />
+          </Card>
+
+          <Button onClick={handleSave} disabled={saving} className="w-full">
+            {saving ? "Saving..." : "Save Changes"}
+          </Button>
 
           {/* Settings */}
           <h3 className="font-semibold text-lg text-foreground pt-4">Settings</h3>

@@ -42,13 +42,18 @@ async function main() {
     where: { email: adminEmail },
   });
   if (!existingAdmin) {
-    await prisma.user.create({
+    const admin = await prisma.user.create({
       data: {
         email: adminEmail,
         passwordHash: await bcrypt.hash('admin1234', 10),
         role: 'ADMIN',
-        patients: { create: { fullName: 'Platform Admin', relation: 'SELF' } },
       },
+    });
+    const adminPatient = await prisma.patient.create({
+      data: { ownerId: admin.id, fullName: 'Platform Admin', relation: 'SELF' },
+    });
+    await prisma.patientAccess.create({
+      data: { patientId: adminPatient.id, userId: admin.id, role: 'SELF' },
     });
   }
 

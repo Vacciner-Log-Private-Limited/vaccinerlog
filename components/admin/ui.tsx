@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import Link from "next/link"
 import { Button as UiButton } from "@/components/ui/button"
 import { Input as UiInput } from "@/components/ui/input"
 
@@ -56,23 +57,46 @@ export function StatCard({
   label,
   value,
   icon,
+  href,
 }: {
   label: string
   value: React.ReactNode
   icon?: React.ReactNode
+  href?: string // when set, the whole card links here
 }) {
-  return (
-    <Panel className="p-5">
+  const inner = (
+    <Panel
+      className={`p-5 h-full ${
+        href
+          ? "transition-colors hover:border-primary/50 hover:bg-muted/40 group"
+          : ""
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm text-muted-foreground">{label}</span>
         {icon && (
-          <span className="w-8 h-8 rounded-lg bg-muted text-muted-foreground grid place-items-center flex-shrink-0">
+          <span
+            className={`w-8 h-8 rounded-lg bg-muted text-muted-foreground grid place-items-center flex-shrink-0 ${
+              href ? "group-hover:bg-primary/10 group-hover:text-primary transition-colors" : ""
+            }`}
+          >
             {icon}
           </span>
         )}
       </div>
       <div className="text-2xl font-semibold text-foreground mt-3 tabular-nums">{value}</div>
     </Panel>
+  )
+
+  if (!href) return inner
+
+  return (
+    <Link
+      href={href}
+      className="block h-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      {inner}
+    </Link>
   )
 }
 

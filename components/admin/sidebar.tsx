@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   Users,
+  Stethoscope,
   Syringe,
   Building2,
   ScrollText,
@@ -16,6 +17,7 @@ import {
 const NAV = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/doctors", label: "Doctors", icon: Stethoscope },
 ]
 
 const MANAGE = [

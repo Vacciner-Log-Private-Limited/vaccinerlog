@@ -61,13 +61,13 @@ export default function AdminOverviewPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard label="Users" value={t.users} icon={<Users className={iconCls} />} />
+        <StatCard label="Users" value={t.users} icon={<Users className={iconCls} />} href="/admin/users" />
         <StatCard label="People" value={t.patients} icon={<UserRound className={iconCls} />} />
         <StatCard label="Records" value={t.records} icon={<ClipboardList className={iconCls} />} />
-        <StatCard label="Certificates" value={t.certificates} icon={<ShieldCheck className={iconCls} />} />
-        <StatCard label="Providers" value={t.providers} icon={<Building2 className={iconCls} />} />
-        <StatCard label="Vaccine types" value={t.vaccines} icon={<Syringe className={iconCls} />} />
-        <StatCard label="Pending reminders" value={t.remindersPending} icon={<BellRing className={iconCls} />} />
+        <StatCard label="Certificates" value={t.certificates} icon={<ShieldCheck className={iconCls} />} href="/admin/certificates" />
+        <StatCard label="Providers" value={t.providers} icon={<Building2 className={iconCls} />} href="/admin/providers" />
+        <StatCard label="Vaccine types" value={t.vaccines} icon={<Syringe className={iconCls} />} href="/admin/vaccines" />
+        <StatCard label="Pending reminders" value={t.remindersPending} icon={<BellRing className={iconCls} />} href="/admin/reminders" />
       </div>
 
       {/* Charts */}

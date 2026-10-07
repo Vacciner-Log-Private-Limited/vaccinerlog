@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { BottomNav } from "@/components/bottom-nav"
 import { AddFamilyModal } from "@/components/add-family-modal"
+import { ManageAccessModal } from "@/components/manage-access-modal"
 import { LoadingSpinner } from "@/components/loading-spinner"
 import { useToast } from "@/components/toast-provider"
 import {
@@ -43,16 +44,21 @@ function initials(name: string): string {
     .toUpperCase()
 }
 
+function ageInYears(dob?: string | null): number | null {
+  if (!dob) return null
+  return Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
+}
+
 function ageFromDob(dob?: string | null): string {
-  if (!dob) return "—"
-  const years = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
-  return `${years} years`
+  const years = ageInYears(dob)
+  return years === null ? "—" : `${years} years`
 }
 
 export default function FamilyPage() {
   const router = useRouter()
   const { showToast } = useToast()
   const [addModalOpen, setAddModalOpen] = useState(false)
+  const [accessMember, setAccessMember] = useState<Patient | null>(null)
   const [patients, setPatients] = useState<Patient[]>([])
   const [records, setRecords] = useState<VaccinationRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -86,7 +92,10 @@ export default function FamilyPage() {
     }
   }
 
-  const family = patients.filter((p) => p.relation !== "SELF")
+  // Members I manage: anything I don't reach as my own "self" profile.
+  const family = patients.filter((p) =>
+    p.accessRole ? p.accessRole !== "SELF" : p.relation !== "SELF",
+  )
   const recordCount = (patientId: string) =>
     records.filter((r) => r.patient?.id === patientId).length
 
@@ -184,6 +193,43 @@ export default function FamilyPage() {
                     <div className="text-xs text-muted-foreground">Health ID</div>
                   </div>
                 </div>
+
+                {/* Shared access — only the guardian can delegate, for adults */}
+                {member.accessRole !== "SELF" &&
+                  (() => {
+                    const age = ageInYears(member.dob)
+                    if (age === null) {
+                      return (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          Add a date of birth to give this member their own login.
+                        </p>
+                      )
+                    }
+                    if (age < 18) {
+                      return (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          They can get their own login once they turn 18.
+                        </p>
+                      )
+                    }
+                    return (
+                      <Button
+                        variant="outline"
+                        className="mt-3 w-full bg-transparent"
+                        onClick={() => setAccessMember(member)}
+                      >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                          />
+                        </svg>
+                        Give / manage access
+                      </Button>
+                    )
+                  })()}
               </Card>
             ))}
 
@@ -212,6 +258,12 @@ export default function FamilyPage() {
 
       <BottomNav active="family" />
       <AddFamilyModal isOpen={addModalOpen} onClose={() => setAddModalOpen(false)} onAdded={load} />
+      <ManageAccessModal
+        isOpen={accessMember !== null}
+        patient={accessMember}
+        onClose={() => setAccessMember(null)}
+        onChanged={load}
+      />
     </div>
   )
 }

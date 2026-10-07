@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, VerificationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ProviderDto,
@@ -131,6 +131,42 @@ export class AdminService {
       where: { id },
       data: { role },
       select: { id: true, email: true, role: true },
+    });
+  }
+
+  // ---- Doctors (verification) ----
+
+  /** All doctor accounts with their verification status, newest first. */
+  async listDoctors() {
+    const doctors = await this.prisma.doctorProfile.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { user: { select: { email: true } } },
+    });
+    return doctors.map((d) => ({
+      id: d.id,
+      userId: d.userId,
+      email: d.user.email,
+      fullName: d.fullName,
+      specialization: d.specialization,
+      registrationNumber: d.registrationNumber,
+      clinicName: d.clinicName,
+      city: d.city,
+      phone: d.phone,
+      status: d.status,
+      createdAt: d.createdAt,
+    }));
+  }
+
+  /** Approve or reject a doctor by their profile id. */
+  async setDoctorStatus(id: string, status: VerificationStatus) {
+    const doctor = await this.prisma.doctorProfile.findUnique({ where: { id } });
+    if (!doctor) {
+      throw new NotFoundException('Doctor not found');
+    }
+    return this.prisma.doctorProfile.update({
+      where: { id },
+      data: { status },
+      select: { id: true, fullName: true, status: true },
     });
   }
 

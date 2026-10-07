@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -35,14 +36,22 @@ export default function LoginPage() {
     }
     setLoading(true)
     try {
+      let role = "USER"
       if (isRegister) {
-        await register({ email, password, fullName })
+        const res = await register({ email, password, fullName })
+        role = res.user.role
         showToast("Account created!", "success")
       } else {
-        await login({ email, password })
+        const res = await login({ email, password })
+        role = res.user.role
         showToast("Welcome back!", "success")
       }
-      router.push("/dashboard")
+      // Doctors go to their portal; a family-invite link takes priority for citizens.
+      if (role === "PROVIDER") {
+        router.push("/doctor")
+      } else {
+        router.push(localStorage.getItem("vacciner_pending_claim") ? "/claim" : "/dashboard")
+      }
     } catch (err) {
       const message =
         err instanceof ApiError ? err.message : "Something went wrong. Is the backend running?"
@@ -261,7 +270,20 @@ export default function LoginPage() {
             </div>
           )}
 
-          <p className="text-center text-sm text-muted-foreground mt-8">
+          <div className="text-center text-sm text-muted-foreground mt-6 space-y-1">
+            <p>Are you a healthcare provider?</p>
+            <div className="flex items-center justify-center gap-2 font-medium">
+              <Link href="/doctor/register?mode=signin" className="text-primary hover:underline font-semibold">
+                Doctor Sign In
+              </Link>
+              <span className="text-muted-foreground/60">·</span>
+              <Link href="/doctor/register?mode=register" className="text-primary hover:underline">
+                Register Practice
+              </Link>
+            </div>
+          </div>
+
+          <p className="text-center text-sm text-muted-foreground mt-6">
             Powered by India&apos;s National Health Mission
           </p>
         </div>

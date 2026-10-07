@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/toast-provider"
+import {
+  ClinicalDetailsFields,
+  emptyClinicalValue,
+  type ClinicalValue,
+} from "@/components/clinical-details-fields"
 import { ApiError, createPatient } from "@/lib/api"
 
 interface AddFamilyModalProps {
@@ -34,6 +39,7 @@ export function AddFamilyModal({ isOpen, onClose, onAdded }: AddFamilyModalProps
   const [gender, setGender] = useState("")
   const [dob, setDob] = useState("")
   const [healthId, setHealthId] = useState("")
+  const [clinical, setClinical] = useState<ClinicalValue>(emptyClinicalValue())
   const [loading, setLoading] = useState(false)
   const { showToast } = useToast()
 
@@ -45,6 +51,7 @@ export function AddFamilyModal({ isOpen, onClose, onAdded }: AddFamilyModalProps
     setGender("")
     setDob("")
     setHealthId("")
+    setClinical(emptyClinicalValue())
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -62,6 +69,11 @@ export function AddFamilyModal({ isOpen, onClose, onAdded }: AddFamilyModalProps
         gender: gender || mapped.gender, // explicit choice overrides the guess
         dob: dob || undefined,
         healthId: healthId || undefined,
+        healthConditions: clinical.healthConditions,
+        hasPriorComplications: clinical.hasPriorComplications ?? undefined,
+        complicationNotes: clinical.complicationNotes || undefined,
+        hasSurgicalComplications: clinical.hasSurgicalComplications ?? undefined,
+        surgicalComplicationNotes: clinical.surgicalComplicationNotes || undefined,
       })
       showToast("Family member added successfully!", "success")
       reset()
@@ -154,6 +166,17 @@ export function AddFamilyModal({ isOpen, onClose, onAdded }: AddFamilyModalProps
               value={healthId}
               onChange={(e) => setHealthId(e.target.value)}
               className="mt-1"
+            />
+          </div>
+
+          <div className="pt-2 border-t border-border">
+            <p className="text-sm font-medium text-foreground mb-1">Clinical health details</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Optional — helps a clinic vaccinate them safely.
+            </p>
+            <ClinicalDetailsFields
+              value={clinical}
+              onChange={(patch) => setClinical((c) => ({ ...c, ...patch }))}
             />
           </div>
 

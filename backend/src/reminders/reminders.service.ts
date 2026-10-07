@@ -1,11 +1,7 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessService } from '../access/access.service';
 import { CreateReminderDto } from './dto/create-reminder.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
 
@@ -18,22 +14,13 @@ const REMINDER_INCLUDE = {
 export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
-
-  private async assertOwnsPatient(ownerId: string, patientId: string) {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-    if (!patient) {
-      throw new NotFoundException('Patient not found');
-    }
-    if (patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this patient');
-    }
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: AccessService,
+  ) {}
 
   async create(ownerId: string, dto: CreateReminderDto) {
-    await this.assertOwnsPatient(ownerId, dto.patientId);
+    await this.access.assertAccess(ownerId, dto.patientId);
     return this.prisma.reminder.create({
       data: {
         patientId: dto.patientId,
@@ -47,7 +34,7 @@ export class RemindersService {
 
   findAllForUser(ownerId: string) {
     return this.prisma.reminder.findMany({
-      where: { patient: { ownerId } },
+      where: { patient: this.access.patientWhere(ownerId) },
       include: REMINDER_INCLUDE,
       orderBy: { dueDate: 'asc' },
     });
@@ -61,9 +48,7 @@ export class RemindersService {
     if (!reminder) {
       throw new NotFoundException('Reminder not found');
     }
-    if (reminder.patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this reminder');
-    }
+    await this.access.assertAccess(ownerId, reminder.patientId);
     return reminder;
   }
 

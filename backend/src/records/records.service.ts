@@ -1,9 +1,6 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessService } from '../access/access.service';
 import { CertificatesService } from '../certificates/certificates.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import { UpdateRecordDto } from './dto/update-record.dto';
@@ -12,25 +9,12 @@ import { UpdateRecordDto } from './dto/update-record.dto';
 export class RecordsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly access: AccessService,
     private readonly certificates: CertificatesService,
   ) {}
 
-  /** Verify the current user owns the given patient. */
-  private async assertOwnsPatient(ownerId: string, patientId: string) {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-    if (!patient) {
-      throw new NotFoundException('Patient not found');
-    }
-    if (patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this patient');
-    }
-    return patient;
-  }
-
-  async create(ownerId: string, dto: CreateRecordDto) {
-    await this.assertOwnsPatient(ownerId, dto.patientId);
+  async create(userId: string, dto: CreateRecordDto) {
+    await this.access.assertAccess(userId, dto.patientId);
     const record = await this.prisma.vaccinationRecord.create({
       data: {
         patientId: dto.patientId,
@@ -46,19 +30,19 @@ export class RecordsService {
     });
     // Every vaccination record automatically gets a verifiable certificate,
     // so it shows up on the Certificates page.
-    await this.certificates.issue(ownerId, record.id);
+    await this.certificates.issue(userId, record.id);
     record.verified = true; // issue() marks the record verified
     return record;
   }
 
   /** All records across the user's patients, optionally filtered to one patient. */
-  async findAllForUser(ownerId: string, patientId?: string) {
+  async findAllForUser(userId: string, patientId?: string) {
     if (patientId) {
-      await this.assertOwnsPatient(ownerId, patientId);
+      await this.access.assertAccess(userId, patientId);
     }
     return this.prisma.vaccinationRecord.findMany({
       where: {
-        patient: { ownerId },
+        patient: this.access.patientWhere(userId),
         ...(patientId ? { patientId } : {}),
       },
       include: {
@@ -71,7 +55,7 @@ export class RecordsService {
     });
   }
 
-  async findOne(ownerId: string, id: string) {
+  async findOne(userId: string, id: string) {
     const record = await this.prisma.vaccinationRecord.findUnique({
       where: { id },
       include: {
@@ -84,14 +68,12 @@ export class RecordsService {
     if (!record) {
       throw new NotFoundException('Record not found');
     }
-    if (record.patient.ownerId !== ownerId) {
-      throw new ForbiddenException('You do not have access to this record');
-    }
+    await this.access.assertAccess(userId, record.patientId);
     return record;
   }
 
-  async update(ownerId: string, id: string, dto: UpdateRecordDto) {
-    await this.findOne(ownerId, id); // ownership check
+  async update(userId: string, id: string, dto: UpdateRecordDto) {
+    await this.findOne(userId, id); // access check
     return this.prisma.vaccinationRecord.update({
       where: { id },
       data: {
@@ -109,23 +91,24 @@ export class RecordsService {
     });
   }
 
-  async remove(ownerId: string, id: string) {
-    await this.findOne(ownerId, id); // ownership check
+  async remove(userId: string, id: string) {
+    await this.findOne(userId, id); // access check
     await this.prisma.vaccinationRecord.delete({ where: { id } });
     return { deleted: true };
   }
 
   /** Dashboard summary counts across all the user's patients. */
-  async summary(ownerId: string) {
+  async summary(userId: string) {
+    const scope = this.access.patientWhere(userId);
     const [totalVaccines, nextDue, certificates] = await Promise.all([
       this.prisma.vaccinationRecord.count({
-        where: { patient: { ownerId }, status: 'COMPLETED' },
+        where: { patient: scope, status: 'COMPLETED' },
       }),
       this.prisma.reminder.count({
-        where: { patient: { ownerId }, status: { in: ['PENDING', 'SENT'] } },
+        where: { patient: scope, status: { in: ['PENDING', 'SENT'] } },
       }),
       this.prisma.certificate.count({
-        where: { record: { patient: { ownerId } } },
+        where: { record: { patient: scope } },
       }),
     ]);
     return { totalVaccines, nextDue, certificates };

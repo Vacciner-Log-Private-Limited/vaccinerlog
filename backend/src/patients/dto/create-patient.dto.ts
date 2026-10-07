@@ -1,10 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender, IdProofType, Relation } from '@prisma/client';
 import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsISO8601,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 
@@ -53,4 +59,50 @@ export class CreatePatientDto {
   @IsOptional()
   @IsString()
   idProofNumber?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['Diabetes', 'Asthma / respiratory illness'],
+    description: 'Chronic health conditions the person has',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(20)
+  @MaxLength(100, { each: true })
+  healthConditions?: string[];
+
+  @ApiPropertyOptional({ example: true, description: 'Any past clinical complications?' })
+  @IsOptional()
+  @IsBoolean()
+  hasPriorComplications?: boolean;
+
+  @ApiPropertyOptional({ example: 'Fever and rash after a previous tetanus shot in 2019.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  complicationNotes?: string;
+
+  @ApiPropertyOptional({ example: true, description: 'Any past surgical complications?' })
+  @IsOptional()
+  @IsBoolean()
+  hasSurgicalComplications?: boolean;
+
+  @ApiPropertyOptional({ example: 'Excess bleeding during an appendectomy in 2021.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  surgicalComplicationNotes?: string;
+
+  @ApiPropertyOptional({ example: 175.5, description: 'Height in cm' })
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  height?: number;
+
+  @ApiPropertyOptional({ example: 68.0, description: 'Weight in kg' })
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  weight?: number;
 }

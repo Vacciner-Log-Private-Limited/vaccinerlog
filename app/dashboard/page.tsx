@@ -10,6 +10,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { BottomNav } from "@/components/bottom-nav"
 import { LoadingSpinner } from "@/components/loading-spinner"
+import { ShareWithDoctorModal } from "@/components/share-with-doctor-modal"
+import { Plane, Calendar } from "lucide-react"
 import {
   ApiError,
   clearToken,
@@ -37,6 +39,7 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [records, setRecords] = useState<VaccinationRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [shareOpen, setShareOpen] = useState(false)
 
   useEffect(() => {
     if (!getToken()) {
@@ -66,7 +69,10 @@ export default function DashboardPage() {
     )
   }
 
-  const self = me?.patients.find((p) => p.relation === "SELF") ?? me?.patients[0]
+  const self =
+    me?.patients.find((p) => p.accessRole === "SELF") ??
+    me?.patients.find((p) => p.relation === "SELF") ??
+    me?.patients[0]
   const displayName = self?.fullName ?? "there"
   const firstName = displayName.split(" ")[0]
   const healthId = self?.healthId ?? "Not linked yet"
@@ -88,19 +94,32 @@ export default function DashboardPage() {
                 <p className="text-white/80 text-xs">Health ID: {healthId}</p>
               </div>
             </div>
-            <Link href="/profile">
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9 bg-slate-700">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                  />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </Button>
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link href="/embassy">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="bg-white/20 hover:bg-white/30 text-white border-0 text-xs gap-1.5 h-9 px-2.5 rounded-full font-semibold shadow-xs"
+                  title="Embassy & Travel Requirements"
+                >
+                  <Plane className="w-3.5 h-3.5" />
+                  <span>Embassy</span>
+                </Button>
+              </Link>
+              <Link href="/profile">
+                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9 bg-slate-700">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </Button>
+              </Link>
+            </div>
           </div>
 
           {/* Summary Cards */}
@@ -118,6 +137,65 @@ export default function DashboardPage() {
               <div className="text-xs text-muted-foreground">Certificates</div>
             </Card>
           </div>
+        </div>
+
+        {/* Share with a doctor */}
+        <div className="px-4 pt-4">
+          <button
+            onClick={() => setShareOpen(true)}
+            className="w-full flex items-center gap-3 rounded-2xl bg-primary text-primary-foreground p-4 shadow-sm hover:opacity-95 transition-opacity"
+          >
+            <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m0 14v1m8-8h-1M5 12H4m1.6-6.4l.7.7m12.1-.7l-.7.7M6.3 17.7l-.7.7m12.8-.7l.7.7M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <div className="text-left flex-1">
+              <div className="font-semibold">Share with a doctor</div>
+              <div className="text-xs text-primary-foreground/80">Show a one-time code at your visit</div>
+            </div>
+            <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+
+          {/* Embassy & International Travel Banner */}
+          <Link href="/embassy" className="block mt-2.5">
+            <div className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-3.5 shadow-sm hover:opacity-95 transition-opacity">
+              <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Plane className="w-6 h-6 text-white" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-sm flex items-center gap-1.5">
+                  <span>Embassy &amp; Travel Vaccines</span>
+                  <span className="text-[10px] bg-white/25 px-1.5 py-0.5 rounded-full font-bold">New</span>
+                </div>
+                <div className="text-xs text-white/80">Check required vaccines before travelling abroad</div>
+              </div>
+              <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* Doctor Appointments Banner */}
+          <Link href="/appointments" className="block mt-2.5">
+            <div className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3.5 shadow-sm hover:opacity-95 transition-opacity">
+              <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Calendar className="w-6 h-6 text-white" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-sm flex items-center gap-1.5">
+                  <span>Doctor Appointments</span>
+                  <span className="text-[10px] bg-white/25 px-1.5 py-0.5 rounded-full font-bold">Consult</span>
+                </div>
+                <div className="text-xs text-white/80">Book visits or tele-consultations with verified doctors</div>
+              </div>
+              <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
         </div>
 
         {/* Quick Actions */}
@@ -282,6 +360,11 @@ export default function DashboardPage() {
       </div>
 
       <BottomNav active="home" />
+      <ShareWithDoctorModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        patients={me?.patients ?? []}
+      />
     </div>
   )
 }
