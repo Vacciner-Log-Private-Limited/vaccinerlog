@@ -1,12 +1,82 @@
 "use client"
+
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { format } from "date-fns"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { BottomNav } from "@/components/bottom-nav"
+import { LoadingSpinner } from "@/components/loading-spinner"
+import { ShareWithDoctorModal } from "@/components/share-with-doctor-modal"
+import { Plane, Calendar } from "lucide-react"
+import {
+  ApiError,
+  clearToken,
+  getMe,
+  getRecords,
+  getSummary,
+  getToken,
+  type Me,
+  type Summary,
+  type VaccinationRecord,
+} from "@/lib/api"
+
+function initials(name: string): string {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+}
 
 export default function DashboardPage() {
+  const router = useRouter()
+  const [me, setMe] = useState<Me | null>(null)
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [records, setRecords] = useState<VaccinationRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [shareOpen, setShareOpen] = useState(false)
+
+  useEffect(() => {
+    if (!getToken()) {
+      router.replace("/login")
+      return
+    }
+    Promise.all([getMe(), getSummary(), getRecords()])
+      .then(([meData, summaryData, recordsData]) => {
+        setMe(meData)
+        setSummary(summaryData)
+        setRecords(recordsData)
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          clearToken()
+          router.replace("/login")
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [router])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    )
+  }
+
+  const self =
+    me?.patients.find((p) => p.accessRole === "SELF") ??
+    me?.patients.find((p) => p.relation === "SELF") ??
+    me?.patients[0]
+  const displayName = self?.fullName ?? "there"
+  const firstName = displayName.split(" ")[0]
+  const healthId = self?.healthId ?? "Not linked yet"
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mobile-container bg-background pb-20">
@@ -15,77 +85,121 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Avatar className="w-10 h-10 border-2 border-white">
-                <AvatarFallback className="bg-white text-primary font-semibold text-sm">YK</AvatarFallback>
+                <AvatarFallback className="bg-white text-primary font-semibold text-sm">
+                  {initials(displayName)}
+                </AvatarFallback>
               </Avatar>
               <div>
-                <h2 className="text-white font-semibold text-base">Hello, Yashwanth 👋</h2>
-                <p className="text-white/80 text-xs">Health ID: 91-XXXX-XXXX-1234</p>
+                <h2 className="text-white font-semibold text-base">Hello, {firstName} 👋</h2>
+                <p className="text-white/80 text-xs">Health ID: {healthId}</p>
               </div>
             </div>
-            <Link href="/profile">
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9 bg-slate-700">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              </Button>
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link href="/embassy">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="bg-white/20 hover:bg-white/30 text-white border-0 text-xs gap-1.5 h-9 px-2.5 rounded-full font-semibold shadow-xs"
+                  title="Embassy & Travel Requirements"
+                >
+                  <Plane className="w-3.5 h-3.5" />
+                  <span>Embassy</span>
+                </Button>
+              </Link>
+              <Link href="/profile">
+                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9 bg-slate-700">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </Button>
+              </Link>
+            </div>
           </div>
 
           {/* Summary Cards */}
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
             <Card className="min-w-[110px] bg-white/95 backdrop-blur p-3 border-0 shadow-md">
-              <div className="text-2xl font-bold text-primary mb-0.5">12</div>
+              <div className="text-2xl font-bold text-primary mb-0.5">{summary?.totalVaccines ?? 0}</div>
               <div className="text-xs text-muted-foreground">Total Vaccines</div>
             </Card>
             <Card className="min-w-[110px] bg-white/95 backdrop-blur p-3 border-0 shadow-md">
-              <div className="text-2xl font-bold mb-0.5 text-primary">2</div>
+              <div className="text-2xl font-bold mb-0.5 text-primary">{summary?.nextDue ?? 0}</div>
               <div className="text-xs text-muted-foreground">Next Due</div>
             </Card>
             <Card className="min-w-[110px] bg-white/95 backdrop-blur p-3 border-0 shadow-md">
-              <div className="text-2xl font-bold text-success mb-0.5">10</div>
+              <div className="text-2xl font-bold text-success mb-0.5">{summary?.certificates ?? 0}</div>
               <div className="text-xs text-muted-foreground">Certificates</div>
             </Card>
           </div>
         </div>
 
-        {/* Next Vaccine Due Alert */}
-        <div className="p-4 pb-3">
-          <Card className="bg-gradient-to-r from-orange-50 to-orange-100 border-orange-200 p-3">
-            <div className="flex items-start gap-2.5">
-              <div className="w-9 h-9 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0">
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="font-semibold text-sm text-foreground mb-0.5">Next Vaccine Due</h4>
-                <p className="text-xs text-muted-foreground mb-2">Hepatitis B - Dose 3 on Nov 15, 2025</p>
-                <Button size="sm" className="bg-orange-500 hover:bg-orange-600 h-8 text-xs">
-                  Set Reminder
-                </Button>
-              </div>
+        {/* Share with a doctor */}
+        <div className="px-4 pt-4">
+          <button
+            onClick={() => setShareOpen(true)}
+            className="w-full flex items-center gap-3 rounded-2xl bg-primary text-primary-foreground p-4 shadow-sm hover:opacity-95 transition-opacity"
+          >
+            <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m0 14v1m8-8h-1M5 12H4m1.6-6.4l.7.7m12.1-.7l-.7.7M6.3 17.7l-.7.7m12.8-.7l.7.7M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
             </div>
-          </Card>
+            <div className="text-left flex-1">
+              <div className="font-semibold">Share with a doctor</div>
+              <div className="text-xs text-primary-foreground/80">Show a one-time code at your visit</div>
+            </div>
+            <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+
+          {/* Embassy & International Travel Banner */}
+          <Link href="/embassy" className="block mt-2.5">
+            <div className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-3.5 shadow-sm hover:opacity-95 transition-opacity">
+              <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Plane className="w-6 h-6 text-white" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-sm flex items-center gap-1.5">
+                  <span>Embassy &amp; Travel Vaccines</span>
+                  <span className="text-[10px] bg-white/25 px-1.5 py-0.5 rounded-full font-bold">New</span>
+                </div>
+                <div className="text-xs text-white/80">Check required vaccines before travelling abroad</div>
+              </div>
+              <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* Doctor Appointments Banner */}
+          <Link href="/appointments" className="block mt-2.5">
+            <div className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3.5 shadow-sm hover:opacity-95 transition-opacity">
+              <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Calendar className="w-6 h-6 text-white" />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-semibold text-sm flex items-center gap-1.5">
+                  <span>Doctor Appointments</span>
+                  <span className="text-[10px] bg-white/25 px-1.5 py-0.5 rounded-full font-bold">Consult</span>
+                </div>
+                <div className="text-xs text-white/80">Book visits or tele-consultations with verified doctors</div>
+              </div>
+              <svg className="w-5 h-5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
         </div>
 
         {/* Quick Actions */}
-        <div className="px-4 pb-3">
+        <div className="px-4 pt-4 pb-3">
           <h3 className="font-semibold text-base text-foreground mb-2.5">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-2.5">
             <Link href="/vaccines" className="mobile-card">
@@ -111,7 +225,8 @@ export default function DashboardPage() {
                 <div className="flex flex-col items-center text-center gap-1.5">
                   <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-neutral-200">
                     <svg className="w-5 h-5 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path className="text-primary"
+                      <path
+                        className="text-primary"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
@@ -172,55 +287,48 @@ export default function DashboardPage() {
               </Button>
             </Link>
           </div>
-          <div className="flex gap-2.5 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-            <Card className="min-w-[250px] p-3">
-              <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-9 h-9 bg-success/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">COVID-19 Booster</p>
-                  <p className="text-xs text-muted-foreground">Oct 20, 2025</p>
-                </div>
-                <Badge className="bg-success text-success-foreground text-[10px] px-1.5 py-0.5">Verified</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground truncate">Apollo Hospital, Hyderabad</p>
-            </Card>
 
-            <Card className="min-w-[250px] p-3">
-              <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-9 h-9 bg-success/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">Influenza (Flu)</p>
-                  <p className="text-xs text-muted-foreground">Aug 10, 2025</p>
-                </div>
-                <Badge className="bg-success text-success-foreground text-[10px] px-1.5 py-0.5">Verified</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground truncate">Care Hospital, Hyderabad</p>
+          {records.length === 0 ? (
+            <Card className="p-6 text-center">
+              <p className="text-sm text-muted-foreground mb-3">No vaccination records yet.</p>
+              <Link href="/vaccines">
+                <Button size="sm">Add your first record</Button>
+              </Link>
             </Card>
-
-            <Card className="min-w-[250px] p-3">
-              <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-9 h-9 bg-success/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">Hepatitis B - Dose 2</p>
-                  <p className="text-xs text-muted-foreground">Jul 5, 2025</p>
-                </div>
-                <Badge className="bg-success text-success-foreground text-[10px] px-1.5 py-0.5">Verified</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground truncate">KIMS Hospital, Hyderabad</p>
-            </Card>
-          </div>
+          ) : (
+            <div className="flex gap-2.5 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+              {records.slice(0, 8).map((r) => (
+                <Card key={r.id} className="min-w-[250px] p-3">
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="w-9 h-9 bg-success/10 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {r.vaccine.name}
+                        {r.doseNumber > 1 ? ` - Dose ${r.doseNumber}` : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(r.dateAdministered), "MMM d, yyyy")}
+                      </p>
+                    </div>
+                    {r.verified ? (
+                      <Badge className="bg-success text-success-foreground text-[10px] px-1.5 py-0.5">Verified</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5">
+                        Pending
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {r.provider?.name ?? "Provider not recorded"}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Health Updates */}
@@ -228,12 +336,7 @@ export default function DashboardPage() {
           <h3 className="font-semibold text-base text-foreground mb-2.5">Health Updates</h3>
           <Card className="bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20 p-3">
             <div className="flex gap-2.5">
-              <svg
-                className="w-4 h-4 text-primary flex-shrink-0 mt-0.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -257,6 +360,11 @@ export default function DashboardPage() {
       </div>
 
       <BottomNav active="home" />
+      <ShareWithDoctorModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        patients={me?.patients ?? []}
+      />
     </div>
   )
 }

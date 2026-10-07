@@ -1,0 +1,473 @@
+// Vacciner Log — database schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER // a citizen using the app
+  PROVIDER // a hospital/clinic staff who records vaccinations
+  ADMIN // platform administrator
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum Relation {
+  SELF
+  SPOUSE
+  CHILD
+  PARENT
+  SIBLING
+  OTHER
+}
+
+enum RecordStatus {
+  COMPLETED
+  SCHEDULED
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  DONE
+  CANCELLED
+}
+
+enum IdProofType {
+  AADHAAR
+  DRIVING_LICENCE
+  PASSPORT
+  OTHER
+}
+
+enum AccessRole {
+  SELF // the person themselves
+  GUARDIAN // a parent/head managing this person
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ConsentStatus {
+  PENDING // code issued, not yet redeemed
+  USED // redeemed by a doctor; access session live until accessExpiresAt
+  EXPIRED
+  REVOKED
+}
+
+enum ConsentScope {
+  VIEW // read the patient's records only
+  VIEW_AND_RECORD // may also add a dose / prescription
+}
+
+enum PublicationType {
+  RESEARCH_PAPER
+  ACHIEVEMENT
+  CASE_STUDY
+  CLINICAL_UPDATE
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  DECLINED
+}
+
+enum ConsultationMode {
+  IN_CLINIC
+  TELE_CONSULT
+}
+
+// ---------------------------------------------------------------------------
+// Auth / account
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // The profiles this user created (kept as the primary/creator link).
+  patients Patient[]
+
+  // Every profile this user can access (their own + any shared with them).
+  accesses       PatientAccess[]
+  invitesCreated Invite[]        @relation("InviteCreatedBy")
+
+  // Doctor accounts (role = PROVIDER) carry a profile and their encounters.
+  doctorProfile DoctorProfile?
+  encounters    Encounter[]
+  publications  DoctorPublication[]
+  publicationLikes DoctorPublicationLike[]
+
+  // Doctor Appointment booking relations
+  appointmentsAsPatient Appointment[] @relation("PatientUserAppointments")
+  appointmentsAsDoctor  Appointment[] @relation("DoctorAppointments")
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// People whose vaccination records we track.
+// The account holder's own profile is a Patient with relation = SELF.
+// Family members are Patients owned by the same user with relation != SELF.
+// ---------------------------------------------------------------------------
+
+model Patient {
+  id        String    @id @default(uuid())
+  ownerId   String
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fullName  String
+  dob       DateTime?
+  gender    Gender?
+  relation  Relation  @default(SELF)
+  healthId  String?   @unique // ABHA / Health ID
+  phone     String?
+  nationality   String?
+  idProofType   IdProofType?
+  idProofNumber String?
+
+  // Clinical health details (self-reported, pre-vaccination history)
+  healthConditions      String[] @default([]) // chronic conditions the person has
+  hasPriorComplications Boolean?              // any past clinical complications? null = unanswered
+  complicationNotes     String?               // free-text detail when the above is true
+  hasSurgicalComplications Boolean?           // any past surgical complications? null = unanswered
+  surgicalComplicationNotes String?           // free-text detail when the above is true
+
+  // Body metrics (BMI tracking)
+  height                Float?                // in cm
+  weight                Float?                // in kg
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  records   VaccinationRecord[]
+  reminders Reminder[]
+  accesses  PatientAccess[]
+  invites   Invite[]
+  consentGrants ConsentGrant[]
+  appointments  Appointment[]
+
+  @@index([ownerId])
+  @@map("patients")
+}
+
+// ---------------------------------------------------------------------------
+// Who can access which profile (the source of truth for access control).
+// A profile can be reached by several accounts: the person (SELF) and any
+// guardians (GUARDIAN).
+// ---------------------------------------------------------------------------
+
+model PatientAccess {
+  id        String     @id @default(uuid())
+  patientId String
+  patient   Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      AccessRole @default(GUARDIAN)
+  createdAt DateTime   @default(now())
+
+  @@unique([patientId, userId])
+  @@index([userId])
+  @@index([patientId])
+  @@map("patient_access")
+}
+
+// ---------------------------------------------------------------------------
+// A claim invite: a guardian grants an adult member their own login.
+// The raw code is never stored — only its SHA-256 hash. Single-use + expiring.
+// ---------------------------------------------------------------------------
+
+model Invite {
+  id          String       @id @default(uuid())
+  patientId   String
+  patient     Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  email       String // bound to the intended recipient's email
+  codeHash    String       @unique // sha256(rawCode)
+  status      InviteStatus @default(PENDING)
+  expiresAt   DateTime
+  createdById String
+  createdBy   User         @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  acceptedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  @@index([patientId])
+  @@index([email])
+  @@map("invites")
+}
+
+// ---------------------------------------------------------------------------
+// Doctor portal
+// ---------------------------------------------------------------------------
+
+// A doctor account is a User with role = PROVIDER plus this profile.
+// Must be APPROVED by an admin before it can use any patient feature.
+model DoctorProfile {
+  id                 String             @id @default(uuid())
+  userId             String             @unique
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName           String
+  specialization     String?
+  registrationNumber String             @unique // medical council registration number
+  clinicName         String?
+  city               String?
+  phone              String?
+  status             VerificationStatus @default(PENDING)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@map("doctor_profiles")
+}
+
+// A patient-issued, time-boxed grant. The raw code is never stored — only its
+// SHA-256 hash. Single-use, expiring, and it names the doctor once redeemed.
+model ConsentGrant {
+  id              String        @id @default(uuid())
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  codeHash        String        @unique // sha256(rawCode)
+  scope           ConsentScope  @default(VIEW)
+  status          ConsentStatus @default(PENDING)
+  expiresAt       DateTime // deadline to redeem (~15 min)
+  doctorUserId    String? // set when a doctor redeems it
+  accessExpiresAt DateTime? // live-access session end (~60 min)
+  usedAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([patientId])
+  @@index([doctorUserId])
+  @@map("consent_grants")
+}
+
+// A visit the doctor keeps (their own record). patientId/patientName are a
+// snapshot so history survives even if the patient profile changes.
+model Encounter {
+  id               String             @id @default(uuid())
+  doctorUserId     String
+  doctor           User               @relation(fields: [doctorUserId], references: [id], onDelete: Cascade)
+  patientId        String
+  patientName      String // snapshot at visit time
+  problem          String? // chief complaint / diagnosis (free text)
+  problemTags      String[]           @default([]) // categorized, for analytics
+  recommendation   String? // advice / plan (free text)
+  prescriptionText String? // unstructured prescription
+  sharedWithPatient Boolean           @default(false)
+  note             String?
+  occurredAt       DateTime           @default(now())
+  prescriptions    PrescriptionItem[]
+  appointment      Appointment?
+
+  @@index([doctorUserId])
+  @@index([patientId])
+  @@map("encounters")
+}
+
+model PrescriptionItem {
+  id           String    @id @default(uuid())
+  encounterId  String
+  encounter    Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  medicine     String
+  dosage       String? // e.g. "500 mg"
+  frequency    String? // e.g. "twice daily"
+  durationDays Int?
+
+  @@index([encounterId])
+  @@map("prescription_items")
+}
+
+model DoctorPublication {
+  id              String            @id @default(uuid())
+  doctorUserId    String
+  doctor          User              @relation(fields: [doctorUserId], references: [id], onDelete: Cascade)
+  type            PublicationType   @default(RESEARCH_PAPER)
+  title           String
+  summary         String
+  specialization  String?
+  tags            String[]          @default([])
+  journalOrIssuer String?
+  publicationUrl  String?
+  year            Int?
+  likesCount      Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  likes           DoctorPublicationLike[]
+
+  @@index([doctorUserId])
+  @@index([type])
+  @@map("doctor_publications")
+}
+
+model DoctorPublicationLike {
+  id            String            @id @default(uuid())
+  publicationId String
+  publication   DoctorPublication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime          @default(now())
+
+  @@unique([publicationId, userId])
+  @@index([publicationId])
+  @@index([userId])
+  @@map("doctor_publication_likes")
+}
+
+// ---------------------------------------------------------------------------
+// Doctor Appointments
+// ---------------------------------------------------------------------------
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  userId          String            // Patient account holder
+  user            User              @relation("PatientUserAppointments", fields: [userId], references: [id], onDelete: Cascade)
+  doctorUserId    String            // Doctor's user ID
+  doctor          User              @relation("DoctorAppointments", fields: [doctorUserId], references: [id], onDelete: Cascade)
+
+  status          AppointmentStatus @default(REQUESTED)
+  mode            ConsultationMode  @default(IN_CLINIC)
+
+  preferredDate   DateTime          // Date requested by patient
+  preferredWindow String?           // e.g. "MORNING", "AFTERNOON", "EVENING"
+  reason          String            // Symptoms / chief complaint
+
+  scheduledAt     DateTime?         // Confirmed date & time assigned by doctor
+  durationMinutes Int               @default(30)
+  doctorNote      String?           // Clinic room / instructions / meeting link
+  declineReason   String?           // Reason if declined
+
+  encounterId     String?           @unique
+  encounter       Encounter?        @relation(fields: [encounterId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([doctorUserId, status])
+  @@index([userId, status])
+  @@index([patientId])
+  @@map("appointments")
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+model Vaccine {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  totalDoses  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  records   VaccinationRecord[]
+  reminders Reminder[]
+
+  @@map("vaccines")
+}
+
+model Provider {
+  id                 String   @id @default(uuid())
+  name               String
+  city               String?
+  registrationNumber String?  @unique
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  records VaccinationRecord[]
+
+  @@map("providers")
+}
+
+// ---------------------------------------------------------------------------
+// The core record: a dose given to a patient
+// ---------------------------------------------------------------------------
+
+model VaccinationRecord {
+  id              String       @id @default(uuid())
+  patientId       String
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  vaccineId       String
+  vaccine         Vaccine      @relation(fields: [vaccineId], references: [id])
+  providerId      String?
+  provider        Provider?    @relation(fields: [providerId], references: [id])
+  doseNumber      Int          @default(1)
+  dateAdministered DateTime
+  batchNumber     String?
+  symptoms        String?
+  status          RecordStatus @default(COMPLETED)
+  verified        Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  certificate Certificate?
+
+  @@index([patientId])
+  @@index([vaccineId])
+  @@map("vaccination_records")
+}
+
+// ---------------------------------------------------------------------------
+// A verifiable certificate generated for a completed record
+// ---------------------------------------------------------------------------
+
+model Certificate {
+  id               String            @id @default(uuid())
+  recordId         String            @unique
+  record           VaccinationRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  verificationCode String            @unique // used by the public /verify endpoint
+  fileUrl          String? // link to the PDF in object storage (added later)
+  issuedAt         DateTime          @default(now())
+
+  @@map("certificates")
+}
+
+// ---------------------------------------------------------------------------
+// Upcoming-dose reminders
+// ---------------------------------------------------------------------------
+
+model Reminder {
+  id         String         @id @default(uuid())
+  patientId  String
+  patient    Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  vaccineId  String
+  vaccine    Vaccine        @relation(fields: [vaccineId], references: [id])
+  doseNumber Int            @default(1)
+  dueDate    DateTime
+  status     ReminderStatus @default(PENDING)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([patientId])
+  @@index([dueDate])
+  @@map("reminders")
+}

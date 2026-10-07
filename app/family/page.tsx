@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,39 +9,95 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { BottomNav } from "@/components/bottom-nav"
 import { AddFamilyModal } from "@/components/add-family-modal"
+import { ManageAccessModal } from "@/components/manage-access-modal"
+import { LoadingSpinner } from "@/components/loading-spinner"
+import { useToast } from "@/components/toast-provider"
+import {
+  deletePatient,
+  getPatients,
+  getRecords,
+  getToken,
+  type Patient,
+  type VaccinationRecord,
+} from "@/lib/api"
 
-const familyMembers = [
-  {
-    id: 1,
-    name: "Priya Kumar",
-    relationship: "Spouse",
-    age: 28,
-    vaccines: 10,
-    nextDue: "Nov 20, 2025",
-    initials: "PK",
-  },
-  {
-    id: 2,
-    name: "Aarav Kumar",
-    relationship: "Son",
-    age: 5,
-    vaccines: 15,
-    nextDue: "Dec 5, 2025",
-    initials: "AK",
-  },
-  {
-    id: 3,
-    name: "Lakshmi Kumar",
-    relationship: "Mother",
-    age: 62,
-    vaccines: 8,
-    nextDue: "Jan 10, 2026",
-    initials: "LK",
-  },
-]
+const RELATION_LABEL: Record<string, string> = {
+  SPOUSE: "Spouse",
+  CHILD: "Child",
+  PARENT: "Parent",
+  SIBLING: "Sibling",
+  OTHER: "Other",
+}
+
+const GENDER_LABEL: Record<string, string> = {
+  MALE: "Male",
+  FEMALE: "Female",
+  OTHER: "Other",
+}
+
+function initials(name: string): string {
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+}
+
+function ageInYears(dob?: string | null): number | null {
+  if (!dob) return null
+  return Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
+}
+
+function ageFromDob(dob?: string | null): string {
+  const years = ageInYears(dob)
+  return years === null ? "—" : `${years} years`
+}
 
 export default function FamilyPage() {
+  const router = useRouter()
+  const { showToast } = useToast()
   const [addModalOpen, setAddModalOpen] = useState(false)
+  const [accessMember, setAccessMember] = useState<Patient | null>(null)
+  const [patients, setPatients] = useState<Patient[]>([])
+  const [records, setRecords] = useState<VaccinationRecord[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(() => {
+    return Promise.all([getPatients(), getRecords()])
+      .then(([p, r]) => {
+        setPatients(p)
+        setRecords(r)
+      })
+      .catch(() => router.replace("/login"))
+      .finally(() => setLoading(false))
+  }, [router])
+
+  useEffect(() => {
+    if (!getToken()) {
+      router.replace("/login")
+      return
+    }
+    load()
+  }, [router, load])
+
+  const handleDelete = async (patient: Patient) => {
+    if (!window.confirm(`Remove ${patient.fullName} and all their records?`)) return
+    try {
+      await deletePatient(patient.id)
+      showToast(`${patient.fullName} removed.`, "success")
+      setPatients((prev) => prev.filter((p) => p.id !== patient.id))
+    } catch {
+      showToast("Could not remove this member.", "error")
+    }
+  }
+
+  // Members I manage: anything I don't reach as my own "self" profile.
+  const family = patients.filter((p) =>
+    p.accessRole ? p.accessRole !== "SELF" : p.relation !== "SELF",
+  )
+  const recordCount = (patientId: string) =>
+    records.filter((r) => r.patient?.id === patientId).length
 
   return (
     <div className="mobile-container">
@@ -74,95 +131,139 @@ export default function FamilyPage() {
           </Button>
         </div>
 
-        {/* Family Members List */}
-        <div className="px-6 pb-6 space-y-3">
-          {familyMembers.map((member) => (
-            <Card key={member.id} className="p-4 mobile-card">
-              <div className="flex items-start gap-3 mb-4">
-                <Avatar className="w-14 h-14 border-2 border-primary/20">
-                  <AvatarFallback className="bg-primary/10 text-primary font-semibold text-lg">
-                    {member.initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-foreground mb-1">{member.name}</h3>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {member.relationship}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">{member.age} years</span>
+        {loading ? (
+          <LoadingSpinner size="lg" />
+        ) : (
+          <div className="px-6 pb-6 space-y-3">
+            {family.length === 0 && (
+              <Card className="p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No family members yet. Add one to manage their records.
+                </p>
+              </Card>
+            )}
+
+            {family.map((member) => (
+              <Card key={member.id} className="p-4 mobile-card">
+                <div className="flex items-start gap-3 mb-4">
+                  <Avatar className="w-14 h-14 border-2 border-primary/20">
+                    <AvatarFallback className="bg-primary/10 text-primary font-semibold text-lg">
+                      {initials(member.fullName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-foreground mb-1">{member.fullName}</h3>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="secondary" className="text-xs">
+                        {RELATION_LABEL[member.relation] ?? member.relation}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        {ageFromDob(member.dob)}
+                        {member.gender ? ` · ${GENDER_LABEL[member.gender] ?? member.gender}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(member)}
+                    aria-label={`Remove ${member.fullName}`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-1">
+                  <div className="bg-accent/50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-primary mb-1">{recordCount(member.id)}</div>
+                    <div className="text-xs text-muted-foreground">Total Vaccines</div>
+                  </div>
+                  <div className="bg-accent/50 rounded-lg p-3">
+                    <div className="text-sm font-semibold text-foreground mb-1">
+                      {member.healthId ?? "Not linked"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Health ID</div>
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="bg-accent/50 rounded-lg p-3">
-                  <div className="text-2xl font-bold text-primary mb-1">{member.vaccines}</div>
-                  <div className="text-xs text-muted-foreground">Total Vaccines</div>
-                </div>
-                <div className="bg-accent/50 rounded-lg p-3">
-                  <div className="text-sm font-semibold text-foreground mb-1">{member.nextDue}</div>
-                  <div className="text-xs text-muted-foreground">Next Due</div>
-                </div>
-              </div>
+                {/* Shared access — only the guardian can delegate, for adults */}
+                {member.accessRole !== "SELF" &&
+                  (() => {
+                    const age = ageInYears(member.dob)
+                    if (age === null) {
+                      return (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          Add a date of birth to give this member their own login.
+                        </p>
+                      )
+                    }
+                    if (age < 18) {
+                      return (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          They can get their own login once they turn 18.
+                        </p>
+                      )
+                    }
+                    return (
+                      <Button
+                        variant="outline"
+                        className="mt-3 w-full bg-transparent"
+                        onClick={() => setAccessMember(member)}
+                      >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                          />
+                        </svg>
+                        Give / manage access
+                      </Button>
+                    )
+                  })()}
+              </Card>
+            ))}
 
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1 bg-transparent">
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                    />
-                  </svg>
-                  View Records
-                </Button>
-                <Button size="sm" className="flex-1">
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  Certificates
-                </Button>
+            {/* Info Card */}
+            <Card className="bg-accent/50 border-primary/20 p-4">
+              <div className="flex gap-3">
+                <svg className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-1">Add Family Members</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Add the people you care for and manage their vaccination records from your account.
+                  </p>
+                </div>
               </div>
             </Card>
-          ))}
-
-          {/* Info Card */}
-          <Card className="bg-accent/50 border-primary/20 p-4">
-            <div className="flex gap-3">
-              <svg
-                className="w-5 h-5 text-primary flex-shrink-0 mt-0.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <div>
-                <p className="text-sm font-medium text-foreground mb-1">Add Family Members</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  You can add up to 5 family members and manage their vaccination records from your account. Each member
-                  needs their own Aadhaar or ABHA number.
-                </p>
-              </div>
-            </div>
-          </Card>
-        </div>
+          </div>
+        )}
       </div>
 
       <BottomNav active="family" />
-      <AddFamilyModal isOpen={addModalOpen} onClose={() => setAddModalOpen(false)} />
+      <AddFamilyModal isOpen={addModalOpen} onClose={() => setAddModalOpen(false)} onAdded={load} />
+      <ManageAccessModal
+        isOpen={accessMember !== null}
+        patient={accessMember}
+        onClose={() => setAccessMember(null)}
+        onChanged={load}
+      />
     </div>
   )
 }

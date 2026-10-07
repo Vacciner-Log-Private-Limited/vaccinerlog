@@ -1,0 +1,211 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
+import PDFDocument from 'pdfkit';
+import * as QRCode from 'qrcode';
+import { PrismaService } from '../prisma/prisma.service';
+import { AccessService } from '../access/access.service';
+
+// A certificate joined with everything the PDF / verification needs.
+type CertWithRecord = Prisma.CertificateGetPayload<{
+  include: {
+    record: { include: { vaccine: true; patient: true; provider: true } };
+  };
+}>;
+
+@Injectable()
+export class CertificatesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly access: AccessService,
+  ) {}
+
+  private frontendUrl(): string {
+    return this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
+  }
+
+  private generateCode(): string {
+    return 'VL-' + randomBytes(6).toString('hex').toUpperCase();
+  }
+
+  private async getOwnedRecord(userId: string, recordId: string) {
+    const record = await this.prisma.vaccinationRecord.findUnique({
+      where: { id: recordId },
+      include: { patient: true, certificate: true },
+    });
+    if (!record) {
+      throw new NotFoundException('Record not found');
+    }
+    await this.access.assertAccess(userId, record.patientId);
+    return record;
+  }
+
+  /** Issue a certificate for a record (idempotent), and mark the record verified. */
+  async issue(userId: string, recordId: string) {
+    const record = await this.getOwnedRecord(userId, recordId);
+    if (record.certificate) {
+      return record.certificate;
+    }
+    const cert = await this.prisma.certificate.create({
+      data: { recordId, verificationCode: this.generateCode() },
+    });
+    // Issuing an official certificate marks the record as verified.
+    await this.prisma.vaccinationRecord.update({
+      where: { id: recordId },
+      data: { verified: true },
+    });
+    return cert;
+  }
+
+  findAllForUser(userId: string) {
+    return this.prisma.certificate.findMany({
+      where: { record: { patient: this.access.patientWhere(userId) } },
+      include: {
+        record: {
+          include: {
+            vaccine: true,
+            provider: true,
+            patient: { select: { id: true, fullName: true, relation: true } },
+          },
+        },
+      },
+      orderBy: { issuedAt: 'desc' },
+    });
+  }
+
+  async findOne(userId: string, id: string): Promise<CertWithRecord> {
+    const cert = await this.prisma.certificate.findUnique({
+      where: { id },
+      include: {
+        record: { include: { vaccine: true, patient: true, provider: true } },
+      },
+    });
+    if (!cert) {
+      throw new NotFoundException('Certificate not found');
+    }
+    await this.access.assertAccess(userId, cert.record.patientId);
+    return cert;
+  }
+
+  /**
+   * PUBLIC: verify a certificate by its code. Returns only non-sensitive fields.
+   * Because the data is looked up from our database by an unguessable code,
+   * the result cannot be forged.
+   */
+  async verifyByCode(code: string) {
+    const cert = await this.prisma.certificate.findUnique({
+      where: { verificationCode: code },
+      include: {
+        record: { include: { vaccine: true, patient: true, provider: true } },
+      },
+    });
+    if (!cert) {
+      return { valid: false as const };
+    }
+    const r = cert.record;
+    return {
+      valid: true as const,
+      certificate: {
+        verificationCode: cert.verificationCode,
+        issuedAt: cert.issuedAt,
+        personName: r.patient.fullName,
+        vaccine: r.vaccine.name,
+        doseNumber: r.doseNumber,
+        totalDoses: r.vaccine.totalDoses,
+        dateAdministered: r.dateAdministered,
+        provider: r.provider?.name ?? null,
+      },
+    };
+  }
+
+  async generatePdf(ownerId: string, id: string): Promise<Buffer> {
+    const cert = await this.findOne(ownerId, id);
+    return this.buildPdf([cert]);
+  }
+
+  /** Combine several of the user's certificates into one multi-page PDF. */
+  async generateBundle(ownerId: string, ids: string[]): Promise<Buffer> {
+    const certs: CertWithRecord[] = [];
+    for (const id of ids) {
+      // findOne is owner-scoped — throws if a cert isn't the user's.
+      certs.push(await this.findOne(ownerId, id));
+    }
+    return this.buildPdf(certs);
+  }
+
+  /** Render one page per certificate into a single PDF buffer. */
+  private async buildPdf(certs: CertWithRecord[]): Promise<Buffer> {
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    const done = new Promise<Buffer>((resolve) =>
+      doc.on('end', () => resolve(Buffer.concat(chunks))),
+    );
+
+    for (let i = 0; i < certs.length; i++) {
+      if (i > 0) doc.addPage();
+      await this.drawCertificate(doc, certs[i]);
+    }
+
+    doc.end();
+    return done;
+  }
+
+  /** Draw a single certificate onto the current page of `doc`. */
+  private async drawCertificate(
+    doc: PDFKit.PDFDocument,
+    cert: CertWithRecord,
+  ): Promise<void> {
+    const r = cert.record;
+    const verifyUrl = `${this.frontendUrl()}/verify/${cert.verificationCode}`;
+    const qrPng = await QRCode.toBuffer(verifyUrl, { width: 220, margin: 1 });
+
+    // Header band
+    doc.rect(0, 0, doc.page.width, 120).fill('#1976D2');
+    doc.fillColor('white').fontSize(26).text('Vacciner Log', 50, 42);
+    doc.fontSize(14).text('Vaccination Certificate', 50, 78);
+    doc.fillColor('black');
+
+    // QR (top-right)
+    doc.image(qrPng, doc.page.width - 190, 150, { width: 140 });
+    doc
+      .fontSize(9)
+      .fillColor('#666')
+      .text('Scan to verify', doc.page.width - 190, 295, {
+        width: 140,
+        align: 'center',
+      });
+
+    // Details
+    let y = 165;
+    const field = (label: string, value: string) => {
+      doc.fontSize(10).fillColor('#888').text(label.toUpperCase(), 50, y);
+      doc.fontSize(14).fillColor('#111').text(value, 50, y + 14);
+      y += 48;
+    };
+    field('Name', r.patient.fullName);
+    field(
+      'Vaccine',
+      `${r.vaccine.name}  —  Dose ${r.doseNumber} of ${r.vaccine.totalDoses}`,
+    );
+    field('Date administered', new Date(r.dateAdministered).toDateString());
+    field('Provider', r.provider?.name ?? 'Not recorded');
+    field('Batch number', r.batchNumber ?? '—');
+
+    // Certificate meta box
+    y += 10;
+    doc.rect(50, y, doc.page.width - 100, 90).fill('#f4f7fb');
+    doc.fillColor('#111').fontSize(11);
+    doc.text(`Certificate ID:  ${cert.id}`, 65, y + 15);
+    doc.text(`Verification code:  ${cert.verificationCode}`, 65, y + 38);
+    doc.text(`Issued:  ${new Date(cert.issuedAt).toDateString()}`, 65, y + 61);
+
+    // Footer
+    doc
+      .fontSize(9)
+      .fillColor('#999')
+      .text(`Verify this certificate at ${verifyUrl}`, 50, 770, { width: 500 });
+  }
+}

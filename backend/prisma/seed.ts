@@ -1,0 +1,73 @@
+import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  const vaccines = [
+    { name: 'COVID-19', description: 'Coronavirus disease 2019 vaccine', totalDoses: 3 },
+    { name: 'Hepatitis B', description: 'Protects against the hepatitis B virus', totalDoses: 3 },
+    { name: 'Hepatitis A', description: 'Protects against the hepatitis A virus', totalDoses: 2 },
+    { name: 'Influenza (Flu)', description: 'Seasonal influenza vaccine', totalDoses: 1 },
+    { name: 'Polio (IPV)', description: 'Inactivated poliovirus vaccine', totalDoses: 4 },
+    { name: 'MMR', description: 'Measles, Mumps and Rubella', totalDoses: 2 },
+    { name: 'Tetanus (Td/Tdap)', description: 'Tetanus, diphtheria and pertussis', totalDoses: 1 },
+    { name: 'Typhoid', description: 'Protects against typhoid fever', totalDoses: 1 },
+  ];
+
+  for (const v of vaccines) {
+    await prisma.vaccine.upsert({
+      where: { name: v.name },
+      update: {},
+      create: v,
+    });
+  }
+
+  const providers = [
+    { name: 'Apollo Hospital', city: 'Hyderabad' },
+    { name: 'Care Hospital', city: 'Hyderabad' },
+    { name: 'KIMS Hospital', city: 'Hyderabad' },
+  ];
+
+  for (const p of providers) {
+    const existing = await prisma.provider.findFirst({ where: { name: p.name } });
+    if (!existing) {
+      await prisma.provider.create({ data: p });
+    }
+  }
+
+  // Platform admin account
+  const adminEmail = 'admin@vaccinerlog.app';
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
+  if (!existingAdmin) {
+    const admin = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        passwordHash: await bcrypt.hash('admin1234', 10),
+        role: 'ADMIN',
+      },
+    });
+    const adminPatient = await prisma.patient.create({
+      data: { ownerId: admin.id, fullName: 'Platform Admin', relation: 'SELF' },
+    });
+    await prisma.patientAccess.create({
+      data: { patientId: adminPatient.id, userId: admin.id, role: 'SELF' },
+    });
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `Seed complete: ${vaccines.length} vaccines, ${providers.length} providers, admin=${adminEmail}`,
+  );
+}
+
+main()
+  .then(() => prisma.$disconnect())
+  .catch(async (e) => {
+    // eslint-disable-next-line no-console
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });
